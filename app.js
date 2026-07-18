@@ -100,7 +100,11 @@
   function openOverlay(id) { const el = document.getElementById(id); if (el) el.hidden = false; }
   function closeOverlay(id) { const el = document.getElementById(id); if (el) el.hidden = true; }
   function anyModalOpen() { return !$('#taskModal').hidden || !$('#confirmModal').hidden; }
-  function closeAllMenus() { $$('.dropdown-menu').forEach(m => m.hidden = true); syncMenuAria(); }
+  function closeAllMenus() {
+    MENUS.forEach(({ menu }) => { const m = document.getElementById(menu); if (m) m.hidden = true; });
+    if (openRowMenu) { openRowMenu.remove(); openRowMenu = null; }
+    syncMenuAria();
+  }
 
   // Menus that use fixed positioning: id -> trigger id
   const MENUS = [
