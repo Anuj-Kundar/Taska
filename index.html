@@ -282,6 +282,23 @@
             </label>
           </div>
         </div>
+
+        <!-- Subtasks editor -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="block text-sm font-medium" for="fSubInput">Subtasks</label>
+            <span id="fSubProgress" class="text-xs font-medium text-slate-400"></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <input id="fSubInput" type="text" placeholder="Add a subtask..."
+              class="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition" />
+            <button type="button" id="fSubAdd" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 text-sm font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 transition">
+              <i data-lucide="plus" class="h-4 w-4"></i> Add
+            </button>
+          </div>
+          <ul id="fSubList" class="mt-2 space-y-1.5"></ul>
+        </div>
+
         <div class="flex items-center justify-end gap-2 pt-2">
           <button type="button" data-close="taskModal" class="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 transition">Cancel</button>
           <button type="submit" class="inline-flex items-center gap-2 rounded-lg bg-brand-600 hover:bg-brand-700 px-4 py-2 text-sm font-semibold text-white transition">

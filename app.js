@@ -27,6 +27,11 @@
   let prefs = load(PREF_KEY, { theme: 'light', sort: 'created', view: 'all', priorityFilter: 'all' });
   let searchQuery = '';
   let pendingConfirm = null;
+  let editorSubtasks = [];              // working copy of subtasks while the task modal is open
+  const expandedTasks = new Set();      // task ids whose subtask panel is expanded in the list
+
+  // Ensure older stored tasks always carry a subtasks array
+  tasks.forEach(t => { if (!Array.isArray(t.subtasks)) t.subtasks = []; });
 
   /* ---------------- Helpers ---------------- */
   function load(key, fallback) {
@@ -61,6 +66,12 @@
   }
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  function subProgress(t) {
+    const subs = t.subtasks || [];
+    const total = subs.length;
+    const done = subs.filter(s => s.done).length;
+    return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
   }
 
   /* ---------------- Toasts ---------------- */
@@ -191,35 +202,63 @@
       </span>` : '';
     const notes = t.notes ? `<p class="mt-1 text-sm text-slate-500 dark:text-slate-400 line-clamp-2 ${t.done ? 'line-through' : ''}">${escapeHtml(t.notes)}</p>` : '';
 
+    // Subtask progress
+    const sp = subProgress(t);
+    const isExpanded = expandedTasks.has(t.id);
+    const allSubsDone = sp.total > 0 && sp.done === sp.total;
+    const subBadge = sp.total ? `
+      <button class="btn-expand inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium transition ${allSubsDone ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400'}" title="${isExpanded ? 'Hide subtasks' : 'Show subtasks'}" aria-expanded="${isExpanded}">
+        <i data-lucide="list-checks" class="h-3 w-3"></i>${sp.done} of ${sp.total}
+        <i data-lucide="chevron-down" class="h-3 w-3 transition-transform ${isExpanded ? 'rotate-180' : ''}"></i>
+      </button>` : '';
+    const subBar = sp.total ? `
+      <div class="mt-2 h-1.5 w-full max-w-[220px] rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+        <div class="h-full rounded-full ${allSubsDone ? 'bg-emerald-500' : 'bg-brand-500'} transition-all duration-300" style="width:${sp.pct}%"></div>
+      </div>` : '';
+    const subPanel = (sp.total && isExpanded) ? `
+      <div class="subtask-panel mt-3 ml-8 space-y-1.5 border-l-2 border-slate-100 dark:border-slate-800 pl-3">
+        ${t.subtasks.map(s => `
+          <div class="flex items-center gap-2.5">
+            <button class="btn-sub-toggle h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center transition ${s.done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 dark:border-slate-600 hover:border-brand-500'}" data-subid="${s.id}" title="${s.done ? 'Mark as not done' : 'Mark as done'}" aria-label="Toggle subtask">
+              ${s.done ? '<i data-lucide="check" class="h-2.5 w-2.5"></i>' : ''}
+            </button>
+            <span class="flex-1 text-sm ${s.done ? 'line-through text-slate-400 dark:text-slate-500' : 'text-slate-600 dark:text-slate-300'}">${escapeHtml(s.title)}</span>
+          </div>`).join('')}
+      </div>` : '';
+
     return `
-    <div class="task-card group relative flex items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 shadow-sm hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 transition" data-id="${t.id}" draggable="true">
-      <button class="btn-toggle mt-0.5 h-5 w-5 shrink-0 rounded-full border-2 flex items-center justify-center transition ${t.done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 dark:border-slate-600 hover:border-brand-500'}" title="${t.done ? 'Mark as not done' : 'Mark as done'}" aria-label="Toggle done">
-        ${t.done ? '<i data-lucide="check" class="h-3.5 w-3.5"></i>' : ''}
-      </button>
+    <div class="task-card group relative rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 shadow-sm hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 transition" data-id="${t.id}" draggable="true">
+      <div class="flex items-start gap-3">
+        <button class="btn-toggle mt-0.5 h-5 w-5 shrink-0 rounded-full border-2 flex items-center justify-center transition ${t.done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 dark:border-slate-600 hover:border-brand-500'}" title="${t.done ? 'Mark as not done' : 'Mark as done'}" aria-label="Toggle done">
+          ${t.done ? '<i data-lucide="check" class="h-3.5 w-3.5"></i>' : ''}
+        </button>
 
-      <div class="min-w-0 flex-1 cursor-pointer btn-edit">
-        <div class="flex items-center gap-2">
-          <span class="h-2 w-2 rounded-full ${p.dot} shrink-0" title="${p.label} priority"></span>
-          <h3 class="font-semibold truncate ${t.done ? 'line-through text-slate-400 dark:text-slate-500' : ''}">${escapeHtml(t.title)}</h3>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2 cursor-pointer btn-edit">
+            <span class="h-2 w-2 rounded-full ${p.dot} shrink-0" title="${p.label} priority"></span>
+            <h3 class="font-semibold truncate ${t.done ? 'line-through text-slate-400 dark:text-slate-500' : ''}">${escapeHtml(t.title)}</h3>
+          </div>
+          ${notes}
+          <div class="mt-2 flex flex-wrap items-center gap-1.5">
+            <span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium ${p.text} bg-slate-100 dark:bg-slate-800">${p.label}</span>
+            ${catBadge}${dueBadge}${subBadge}
+          </div>
+          ${subBar}
         </div>
-        ${notes}
-        <div class="mt-2 flex flex-wrap items-center gap-1.5">
-          <span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium ${p.text} bg-slate-100 dark:bg-slate-800">${p.label}</span>
-          ${catBadge}${dueBadge}
+
+        <div class="flex items-center gap-0.5 shrink-0">
+          <button class="btn-star h-8 w-8 inline-flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition ${t.starred ? 'text-amber-500' : 'text-slate-400'}" title="${t.starred ? 'Unstar' : 'Star'}" aria-label="Star">
+            <i data-lucide="star" class="h-4 w-4 ${t.starred ? 'fill-amber-500' : ''}"></i>
+          </button>
+          <button class="btn-edit h-8 w-8 inline-flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition text-slate-400" title="Edit" aria-label="Edit">
+            <i data-lucide="pencil" class="h-4 w-4"></i>
+          </button>
+          <button class="btn-delete h-8 w-8 inline-flex items-center justify-center rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 hover:text-red-500 transition text-slate-400" title="Delete" aria-label="Delete">
+            <i data-lucide="trash-2" class="h-4 w-4"></i>
+          </button>
         </div>
       </div>
-
-      <div class="flex items-center gap-0.5 shrink-0">
-        <button class="btn-star h-8 w-8 inline-flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition ${t.starred ? 'text-amber-500' : 'text-slate-400'}" title="${t.starred ? 'Unstar' : 'Star'}" aria-label="Star">
-          <i data-lucide="star" class="h-4 w-4 ${t.starred ? 'fill-amber-500' : ''}"></i>
-        </button>
-        <button class="btn-edit h-8 w-8 inline-flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition text-slate-400" title="Edit" aria-label="Edit">
-          <i data-lucide="pencil" class="h-4 w-4"></i>
-        </button>
-        <button class="btn-delete h-8 w-8 inline-flex items-center justify-center rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 hover:text-red-500 transition text-slate-400" title="Delete" aria-label="Delete">
-          <i data-lucide="trash-2" class="h-4 w-4"></i>
-        </button>
-      </div>
+      ${subPanel}
     </div>`;
   }
 
@@ -338,9 +377,46 @@
     const prio = task ? task.priority : 'medium';
     const radio = form.querySelector(`input[name="priority"][value="${prio}"]`);
     if (radio) radio.checked = true;
+    // Work on a copy so cancelling the modal discards subtask edits
+    editorSubtasks = task ? (task.subtasks || []).map(s => ({ ...s })) : [];
+    $('#fSubInput').value = '';
+    renderSubEditor();
     stylePriorityPicker();
     openOverlay('taskModal');
     setTimeout(() => $('#fTitle').focus(), 50);
+  }
+
+  /* ---------------- Subtask editor (inside task modal) ---------------- */
+  function renderSubEditor() {
+    const listEl = $('#fSubList');
+    const done = editorSubtasks.filter(s => s.done).length;
+    $('#fSubProgress').textContent = editorSubtasks.length ? `${done} of ${editorSubtasks.length} done` : '';
+    if (!editorSubtasks.length) {
+      listEl.innerHTML = `<li class="text-xs text-slate-400 dark:text-slate-500 py-1">No subtasks yet. Break this task into smaller steps.</li>`;
+      icons();
+      return;
+    }
+    listEl.innerHTML = editorSubtasks.map(s => `
+      <li class="flex items-center gap-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-2" data-subid="${s.id}">
+        <button type="button" class="sub-edit-toggle h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center transition ${s.done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 dark:border-slate-600 hover:border-brand-500'}" title="${s.done ? 'Mark as not done' : 'Mark as done'}" aria-label="Toggle subtask">
+          ${s.done ? '<i data-lucide="check" class="h-2.5 w-2.5"></i>' : ''}
+        </button>
+        <span class="flex-1 text-sm ${s.done ? 'line-through text-slate-400 dark:text-slate-500' : ''}">${escapeHtml(s.title)}</span>
+        <button type="button" class="sub-edit-remove h-7 w-7 inline-flex items-center justify-center rounded-md text-slate-400 hover:bg-red-50 dark:hover:bg-red-500/10 hover:text-red-500 transition" title="Remove subtask" aria-label="Remove subtask">
+          <i data-lucide="x" class="h-4 w-4"></i>
+        </button>
+      </li>`).join('');
+    icons();
+  }
+
+  function addEditorSubtask() {
+    const input = $('#fSubInput');
+    const title = input.value.trim();
+    if (!title) { input.focus(); return; }
+    editorSubtasks.push({ id: uid(), title, done: false });
+    input.value = '';
+    renderSubEditor();
+    input.focus();
   }
 
   function stylePriorityPicker() {
@@ -363,6 +439,7 @@
       due: $('#fDue').value || '',
       category: $('#fCategory').value,
       priority: (document.querySelector('input[name="priority"]:checked') || {}).value || 'medium',
+      subtasks: editorSubtasks.map(s => ({ ...s })),
     };
     if (id) {
       const t = tasks.find(x => x.id === id);
@@ -397,6 +474,17 @@
   function toggleStar(id) {
     const t = tasks.find(x => x.id === id); if (!t) return;
     t.starred = !t.starred;
+    render();
+  }
+  function toggleSubtask(taskId, subId) {
+    const t = tasks.find(x => x.id === taskId); if (!t || !t.subtasks) return;
+    const s = t.subtasks.find(x => x.id === subId); if (!s) return;
+    s.done = !s.done;
+    render();
+  }
+  function toggleExpand(id) {
+    if (expandedTasks.has(id)) expandedTasks.delete(id);
+    else expandedTasks.add(id);
     render();
   }
   function deleteTask(id) {
@@ -452,13 +540,17 @@
   function seed() {
     const t = todayStr();
     const plus = n => { const d = parseDate(t); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+    const sub = (...titles) => titles.map((title, i) => ({ id: uid(), title, done: i === 0 }));
     tasks = [
-      { id: uid(), title: 'Finalize Q3 product roadmap', notes: 'Align with design and eng leads before the review.', due: plus(1), category: 'Work', priority: 'high', done: false, starred: true, created: Date.now() },
-      { id: uid(), title: 'Design review: onboarding flow', notes: 'Collect feedback on the new empty states.', due: t, category: 'Work', priority: 'medium', done: false, starred: false, created: Date.now() - 1 },
-      { id: uid(), title: 'Grocery run', notes: 'Coffee, oats, olive oil, veggies.', due: t, category: 'Shopping', priority: 'low', done: false, starred: false, created: Date.now() - 2 },
-      { id: uid(), title: 'Morning workout', notes: '', due: t, category: 'Health', priority: 'medium', done: true, starred: false, created: Date.now() - 3 },
-      { id: uid(), title: 'Read "Refactoring UI" chapter 4', notes: 'Take notes on spacing systems.', due: plus(3), category: 'Learning', priority: 'low', done: false, starred: true, created: Date.now() - 4 },
-      { id: uid(), title: 'Call the dentist', notes: 'Schedule 6-month cleanup.', due: plus(-1), category: 'Personal', priority: 'high', done: false, starred: false, created: Date.now() - 5 },
+      { id: uid(), title: 'Finalize Q3 product roadmap', notes: 'Align with design and eng leads before the review.', due: plus(1), category: 'Work', priority: 'high', done: false, starred: true, created: Date.now(),
+        subtasks: sub('Draft objectives', 'Review with design', 'Review with engineering', 'Publish to team') },
+      { id: uid(), title: 'Design review: onboarding flow', notes: 'Collect feedback on the new empty states.', due: t, category: 'Work', priority: 'medium', done: false, starred: false, created: Date.now() - 1,
+        subtasks: sub('Prepare Figma prototype', 'Book review slot', 'Gather feedback') },
+      { id: uid(), title: 'Grocery run', notes: 'Coffee, oats, olive oil, veggies.', due: t, category: 'Shopping', priority: 'low', done: false, starred: false, created: Date.now() - 2,
+        subtasks: sub('Coffee', 'Oats', 'Olive oil', 'Veggies') },
+      { id: uid(), title: 'Morning workout', notes: '', due: t, category: 'Health', priority: 'medium', done: true, starred: false, created: Date.now() - 3, subtasks: [] },
+      { id: uid(), title: 'Read "Refactoring UI" chapter 4', notes: 'Take notes on spacing systems.', due: plus(3), category: 'Learning', priority: 'low', done: false, starred: true, created: Date.now() - 4, subtasks: [] },
+      { id: uid(), title: 'Call the dentist', notes: 'Schedule 6-month cleanup.', due: plus(-1), category: 'Personal', priority: 'high', done: false, starred: false, created: Date.now() - 5, subtasks: [] },
     ];
     toast('Sample data loaded', 'success');
     render();
@@ -566,6 +658,9 @@
     $('#taskList').addEventListener('click', e => {
       const card = e.target.closest('.task-card'); if (!card) return;
       const id = card.dataset.id;
+      const subToggle = e.target.closest('.btn-sub-toggle');
+      if (subToggle) return toggleSubtask(id, subToggle.dataset.subid);
+      if (e.target.closest('.btn-expand')) return toggleExpand(id);
       if (e.target.closest('.btn-toggle')) return toggleDone(id);
       if (e.target.closest('.btn-star')) return toggleStar(id);
       if (e.target.closest('.btn-delete')) return deleteTask(id);
@@ -579,6 +674,24 @@
       const opt = e.target.closest('.prio-opt'); if (!opt) return;
       opt.querySelector('input').checked = true;
       stylePriorityPicker();
+    });
+
+    // Subtask editor (inside task modal)
+    $('#fSubAdd').addEventListener('click', addEditorSubtask);
+    $('#fSubInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); addEditorSubtask(); }
+    });
+    $('#fSubList').addEventListener('click', e => {
+      const row = e.target.closest('[data-subid]'); if (!row) return;
+      const subId = row.dataset.subid;
+      const sub = editorSubtasks.find(s => s.id === subId); if (!sub) return;
+      if (e.target.closest('.sub-edit-remove')) {
+        editorSubtasks = editorSubtasks.filter(s => s.id !== subId);
+        renderSubEditor();
+      } else if (e.target.closest('.sub-edit-toggle')) {
+        sub.done = !sub.done;
+        renderSubEditor();
+      }
     });
 
     // Generic close buttons (data-close) + backdrop clicks
